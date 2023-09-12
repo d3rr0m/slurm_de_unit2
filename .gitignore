@@ -26,6 +26,8 @@ share/python-wheels/
 *.egg
 MANIFEST
 test.py
+yield.py
+file.json
 .gitattributes
 
 # PyInstaller
