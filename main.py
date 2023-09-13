@@ -14,7 +14,7 @@ import time
 
 URL = 'http://5.159.103.105:4000/api/v1/logs'
 #MAX_PAGE = 131962
-MAX_PAGE = 1310
+MAX_PAGE = 13000
 result = []
 
 
@@ -51,11 +51,25 @@ def create_url(page):
 
 
 async def main():
+    start_url_time = time.time()
     urls = [create_url(page) for page in range(1, MAX_PAGE)]
-
+    print("--- %s seconds ---" % (time.time() - start_url_time))
+    
     async with aiohttp.ClientSession() as session:
-        status = await download_page(session, urls[0])
-        print(f'{status} status had been returned')
+        requests = [download_page(session, url) for url in urls]
+        #statuses = await asyncio.gather(*requests)
+        for done_task in asyncio.as_completed(requests):
+            try:
+                result = await done_task
+                if result != 200:
+                    print(f'Status is {result}')
+            except asyncio.TimeoutError:
+                print("timeout")
+            except aiohttp.ServerDisconnectedError:
+                print('disc')
+        
+        #for task in asyncio.all_tasks():
+            #print(task)
 
 
 if __name__ == '__main__':
