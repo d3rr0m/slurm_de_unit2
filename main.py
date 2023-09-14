@@ -3,6 +3,7 @@ from typing import Any
 import aiohttp
 from aiohttp import ClientSession
 import asyncio
+import os
 import urllib
 from collections import namedtuple
 from urllib.parse import urlunparse, urlencode
@@ -14,8 +15,14 @@ import time
 
 URL = 'http://5.159.103.105:4000/api/v1/logs'
 #MAX_PAGE = 131962
-MAX_PAGE = 10000
+MAX_PAGE = 5000
+CHUNK_SIZE = 1000
+FILE_NAME = 'file.json'
 result = []
+
+
+def remove_file(filename):
+    os.remove(filename)
 
 
 async def save_to_disc(response):
@@ -58,32 +65,57 @@ def create_url(page):
     return url
 
 
-async def main():
-    start_url_time = time.time()
-    urls = [create_url(page) for page in range(1, MAX_PAGE)]
-    print("--- %s seconds ---" % (time.time() - start_url_time))
-    conn = aiohttp.TCPConnector(limit=80)
-    
-    async with aiohttp.ClientSession(connector=conn) as session:
-        requests = [download_page(session, url) for url in urls]
-        #statuses = await asyncio.gather(*requests)
-        for done_task in asyncio.as_completed(requests, timeout=1000):
-            try:
-                result = await done_task
-                if result != 200:
-                    print(f'Status is {result}')
-            except aiohttp.ClientConnectionError:
-                print('disc')
-                #asyncio.sleep(1)
-            except asyncio.TimeoutError:
-                print(f'{result}timeout')
-                    
-        #for task in asyncio.all_tasks():
-            #print(task)
+def test_list():
+    urls = [page for page in range(1, 70)]
+    while urls:
+        requests = urls[:50]
+        urls = urls[50:]
+        print(requests)
+        print(urls)
 
+
+async def main():
+    remove_file(FILE_NAME)
+    urls = [create_url(page) for page in range(1, MAX_PAGE)]
+    conn = aiohttp.TCPConnector(limit=100)
+    async with aiohttp.ClientSession(connector=conn) as session:
+        while urls:
+            urls_chunk = urls[:CHUNK_SIZE]
+            urls = urls[CHUNK_SIZE:]
+        
+            requests = [download_page(session, url) for url in urls_chunk]
+            
+            responses = await asyncio.gather(*requests, return_exceptions=True)
+            """ for done_task in asyncio.as_completed(requests, timeout=1000):
+                try:
+                    result = await done_task
+                    if result != 200:
+                        print(f'Status is {result}')
+                except aiohttp.ClientConnectionError:
+                    print('disc')
+                    #asyncio.sleep(1)
+                except asyncio.TimeoutError:
+                    print(f'{result}timeout')
+                        """
+            #for task in asyncio.all_tasks():
+                #print(task)
+            ok_status = 0
+            notok_status = 0
+            exceptions = [res for res in responses if isinstance(res, Exception)]
+            successful_results = [res for res in responses if not isinstance(res, Exception)]
+            for response in responses:
+                if response == 200:
+                    ok_status+=1 
+                else:
+                    notok_status+=1
+            print (f'ok - {ok_status}')
+            print (f'not ok - {notok_status}')
+            #print (f'ok - {successful_results}')
+            print (f'not ok - {exceptions}')
 
 if __name__ == '__main__':
     start_time = time.time()
     asyncio.run(main())
+    #test_list()
     print("--- %s seconds ---" % (time.time() - start_time))
 
