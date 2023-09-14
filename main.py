@@ -9,25 +9,26 @@ from collections import namedtuple
 from urllib.parse import urlunparse, urlencode
 import queue
 from threading import Thread
-import time
+import time, datetime
 
 
 
 URL = 'http://5.159.103.105:4000/api/v1/logs'
-#MAX_PAGE = 131962
-MAX_PAGE = 5000
+MAX_PAGE = 131962
+#MAX_PAGE = 5000
 CHUNK_SIZE = 1000
 FILE_NAME = 'file.json'
 result = []
 
 
 def remove_file(filename):
-    os.remove(filename)
+    if os.path.exists(filename):
+        os.remove(filename)
 
 
 async def save_to_disc(response):
     with open('file.json', 'ab') as file:
-        async for chunk in response.content.iter_chunked(1024):
+        async for chunk in response.content.iter_chunked(2048):
             file.write(chunk)
 
 
@@ -80,6 +81,7 @@ async def main():
     conn = aiohttp.TCPConnector(limit=100)
     async with aiohttp.ClientSession(connector=conn) as session:
         while urls:
+            start_time = time.time()
             urls_chunk = urls[:CHUNK_SIZE]
             urls = urls[CHUNK_SIZE:]
         
@@ -112,6 +114,9 @@ async def main():
             print (f'not ok - {notok_status}')
             #print (f'ok - {successful_results}')
             print (f'not ok - {exceptions}')
+            print(datetime.datetime.utcnow())
+            print("--- %s seconds ---" % (time.time() - start_time))
+            await asyncio.sleep(10)
 
 if __name__ == '__main__':
     start_time = time.time()
