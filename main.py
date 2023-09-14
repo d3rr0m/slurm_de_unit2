@@ -14,19 +14,27 @@ import time
 
 URL = 'http://5.159.103.105:4000/api/v1/logs'
 #MAX_PAGE = 131962
-MAX_PAGE = 13000
+MAX_PAGE = 10000
 result = []
+
+
+async def save_to_disc(response):
+    with open('file.json', 'ab') as file:
+        async for chunk in response.content.iter_chunked(1024):
+            file.write(chunk)
 
 
 async def download_page(session: ClientSession, url: str):
     async with session.get(url) as response:
+        with open('file.json', 'ab') as file:
+            async for chunk in response.content.iter_chunked(1024):
+                file.write(chunk)
         return response.status
     #response.raise_for_status()
     #if response.status_code != 200:
         #print(f'starts {url}')
         #response_json = response.json()
-        #with open('file.json', 'a') as file:
-        #    file.write(str(response.json()))
+    
 
 
 def create_url(page):
@@ -54,20 +62,22 @@ async def main():
     start_url_time = time.time()
     urls = [create_url(page) for page in range(1, MAX_PAGE)]
     print("--- %s seconds ---" % (time.time() - start_url_time))
+    conn = aiohttp.TCPConnector(limit=80)
     
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(connector=conn) as session:
         requests = [download_page(session, url) for url in urls]
         #statuses = await asyncio.gather(*requests)
-        for done_task in asyncio.as_completed(requests):
+        for done_task in asyncio.as_completed(requests, timeout=1000):
             try:
                 result = await done_task
                 if result != 200:
                     print(f'Status is {result}')
-            except asyncio.TimeoutError:
-                print("timeout")
-            except aiohttp.ServerDisconnectedError:
+            except aiohttp.ClientConnectionError:
                 print('disc')
-        
+                #asyncio.sleep(1)
+            except asyncio.TimeoutError:
+                print(f'{result}timeout')
+                    
         #for task in asyncio.all_tasks():
             #print(task)
 
