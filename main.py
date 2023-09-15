@@ -14,8 +14,8 @@ import time, datetime
 
 
 URL = 'http://5.159.103.105:4000/api/v1/logs'
-MAX_PAGE = 131962
-#MAX_PAGE = 5000
+#MAX_PAGE = 131962
+MAX_PAGE = 10000
 CHUNK_SIZE = 1000
 FILE_NAME = 'file.json'
 result = []
@@ -76,9 +76,9 @@ def test_list():
 
 
 async def main():
-    remove_file(FILE_NAME)
+    #remove_file(FILE_NAME)
     urls = [create_url(page) for page in range(1, MAX_PAGE)]
-    conn = aiohttp.TCPConnector(limit=100)
+    conn = aiohttp.TCPConnector(limit=400, force_close=True)
     async with aiohttp.ClientSession(connector=conn) as session:
         while urls:
             start_time = time.time()
@@ -103,24 +103,27 @@ async def main():
                 #print(task)
             ok_status = 0
             notok_status = 0
+            st_429 = 0
             exceptions = [res for res in responses if isinstance(res, Exception)]
             successful_results = [res for res in responses if not isinstance(res, Exception)]
             for response in responses:
                 if response == 200:
                     ok_status+=1 
+                elif response == 429:
+                    st_429+=1
                 else:
                     notok_status+=1
             print (f'ok - {ok_status}')
             print (f'not ok - {notok_status}')
+            print (f'429 - {st_429}')
             #print (f'ok - {successful_results}')
             print (f'not ok - {exceptions}')
             print(datetime.datetime.utcnow())
             print("--- %s seconds ---" % (time.time() - start_time))
-            await asyncio.sleep(10)
+            await asyncio.sleep(15)
 
 if __name__ == '__main__':
     start_time = time.time()
     asyncio.run(main())
     #test_list()
     print("--- %s seconds ---" % (time.time() - start_time))
-
