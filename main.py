@@ -1,98 +1,83 @@
-import threading
-from collections.abc import Callable, Iterable, Mapping
-from typing import Any
 import aiohttp
-from aiohttp import ClientSession
 import asyncio
-from aiocsv import AsyncDictWriter
-import aiofiles
-import os
 import httpx
 import argparse
 from collections import namedtuple
 from urllib.parse import urlunparse, urlencode
-from codetiming import Timer
-from threading import Thread
-import time, datetime
 import csv
 
 
+def init(filename):
+    init_fieldnames_url = 'http://5.159.103.105:4000/api/v1/structure'
+    init_max_page_url = 'http://5.159.103.105:4000/api/v1/logs'
 
-URL = 'http://5.159.103.105:4000/api/v1/logs'
-
-MAX_PAGE = 13
-#MAX_PAGE = 5000
-FILENAME = 'file.json'
-
-
-def init():
-    init_url = 'http://5.159.103.105:4000/api/v1/structure'
-    response = httpx.get(init_url)
+    response = httpx.get(init_fieldnames_url)
     response.raise_for_status()
     fieldnames = [item['field_name'] for item in response.json()['items']]
-    
-    with open('file.csv', 'w') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';', lineterminator='\n')
+    with open(filename, 'w') as csvfile:
+        writer = csv.DictWriter(
+            csvfile,
+            fieldnames=fieldnames,
+            delimiter='\t',
+            lineterminator='\n',
+            )
         writer.writeheader()
-    return fieldnames
+
+    response = httpx.get(init_max_page_url, params={'page': 1})
+    response.raise_for_status()
+    totalEntries = response.json()['totalEntries']
+    per_page = response.json()['per_page']
+    max_page = round(totalEntries/per_page)+1
+
+    return fieldnames, max_page
 
 
-async def async_write_csv(rows, fieldnames):
-    with aiofiles.open('file.csv', mode='a', newline='', encoding='utf-8') as csvfile:
-        writer = AsyncDictWriter(csvfile, fieldnames=fieldnames, lineterminator='\n', delimiter=';')
-        await writer.writerows(rows['items'])
-    print(200)
-
-
-def test_write(rows, fieldnames):
-    with open('file.csv', 'a') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=';', lineterminator='\n')
+def write_to_csv(rows, fieldnames, filename):
+    with open(filename, 'a') as csvfile:
+        writer = csv.DictWriter(
+            csvfile,
+            fieldnames=fieldnames,
+            delimiter='\t',
+            lineterminator='\n'
+            )
         writer.writerows(rows['items'])
 
 
-def remove_file(filename):
-    if os.path.exists(filename):
-        os.remove(filename)
-
-
-async def save_to_disc(response):
-    with open('file.json', 'ab') as file:
-        async for chunk in response.content.iter_chunked(2048):
-            file.write(chunk)
-
-
-async def download_page(name, queue, fieldnames):
-    #timer = Timer(text=f'{name} elapsed time: {{:.3f}}')
-    async with aiohttp.ClientSession() as session: 
+async def download_page(name, queue, fieldnames, filename):
+    async with aiohttp.ClientSession() as session:
         while not queue.empty():
             url = await queue.get()
-            #print(f'Task {name} is fetching {url}')
-            #timer.start()
-            async with session.get(url) as response:
-                if response.status == 429:
-                    print (f'429 error, {url}')
-                    await asyncio.sleep(5)
-                    await queue.put(url)
-                if response.status != 200:
-                    print('NOT OK')
-                elif response.status == 200:
-                    rows = await response.json()
-                    test_write(rows, fieldnames)
-            #timer.stop()
+
+            try:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        rows = await response.json()
+                        write_to_csv(rows, fieldnames, filename)
+                    elif response.status == 429:
+                        await asyncio.sleep(10)
+                        await queue.put(url)
+                    elif response.status == 404:
+                        print(f'''The page {url} doesn't exist.''')
+                    else:
+                        print('f{url} {response.status}')
+            except aiohttp.client_exceptions.ClientConnectorError as e:
+                print('Connection error.', str(e))
+            except Exception as e:
+                print('There is a problem.', str(e))
 
 
 def create_url(page):
     Components = namedtuple(
-    typename='Components', 
-    field_names=['scheme', 'netloc', 'url', 'path', 'query', 'fragment']
-    )
+        typename='Components',
+        field_names=['scheme', 'netloc', 'url', 'path', 'query', 'fragment']
+        )
     params = {
         'page': f'{page}',
     }
     url = urlunparse(
         Components(
             scheme='http',
-            netloc='5.159.103.105:4000',
+            netloc='1.159.103.105:4000',
             query=urlencode(params),
             path='',
             url='/api/v1/logs',
@@ -104,51 +89,60 @@ def create_url(page):
 
 async def main():
     parser = argparse.ArgumentParser(
-        description='Программа получает данные из сервиса API'\
-        ' http://5.159.103.105:4000/ и сохраняет полученный датасет в файл в'\
-        ' формате csv.'
+        description='''Программа получает данные из сервиса API
+         http://5.159.103.105:4000/ и сохраняет полученный датасет в файл в
+         формате csv.'''
     )
     parser.add_argument(
         '-s',
         '--start_page',
         default=1,
         type=int,
-        help='Номер стартовой страницы с которой начнется выборка данных. '\
-            'Значение по умолчанию - 1.',
+        help='''Номер стартовой страницы с которой начнется выборка данных.
+            Значение по умолчанию - 1.''',
         )
     parser.add_argument(
         '-e',
         '--end_page',
-        default=131962,
+        default=None,
         type=int,
-        help='Номер последней страницы на которой выборка данных закончится. '\
-            'Значение по умолчанию - масимально доступное кол-во страниц.',
+        help='''Номер последней страницы на которой выборка данных закончится.
+            Значение по умолчанию - масимально доступное кол-во страниц.''',
         )
     parser.add_argument(
         '-t',
         '--tasks',
         default=1,
         type=int,
-        help='Количевство одновременно работающих task '\
-            'Значение по умолчанию - масимально доступное кол-во страниц.',
+        help='''Количевство одновременно работающих task
+            Значение по умолчанию - масимально доступное кол-во страниц.''',
+        ),
+    parser.add_argument(
+        '-f',
+        '--filename',
+        default='customs_data.csv',
+        type=str,
+        help='''Имя файла, куда будет сохранен датасет.
+            Значение по умолчанию - customs_data.csv''',
         )
     args = parser.parse_args()
-    
-    remove_file(FILENAME)
-    fieldnames = init()
+    fieldnames, max_page = init(args.filename)
+    args.end_page = max_page+1 if args.end_page is None else args.end_page+1
+
     queue = asyncio.Queue()
-    urls = [create_url(page) for page in range(args.start_page, args.end_page+1)]
+    urls = [create_url(page) for page in range(args.start_page, args.end_page)]
     for url in urls:
         await queue.put(url)
-    
-    tasks = (asyncio.create_task(download_page(f'{worker}', queue, fieldnames)) for worker in range(args.tasks))
-    with Timer(text='\nTotal elapse time: {:.1f}'):
-        await asyncio.gather(*tasks)
+
+    tasks = (asyncio.create_task(download_page(
+        f'{worker}',
+        queue,
+        fieldnames,
+        args.filename,
+        )) for worker in range(args.tasks))
+
+    await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
-    
-    start_time = time.time()
     asyncio.run(main())
-    #test_list()
-    print("--- %s seconds ---" % (time.time() - start_time))
