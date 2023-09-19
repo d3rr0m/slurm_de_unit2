@@ -4,7 +4,7 @@ import httpx
 import argparse
 from collections import namedtuple
 from urllib.parse import urlunparse, urlencode
-import csv
+from csv import DictWriter
 
 
 def init(filename):
@@ -15,7 +15,7 @@ def init(filename):
     response.raise_for_status()
     fieldnames = [item['field_name'] for item in response.json()['items']]
     with open(filename, 'w') as csvfile:
-        writer = csv.DictWriter(
+        writer = DictWriter(
             csvfile,
             fieldnames=fieldnames,
             delimiter='\t',
@@ -34,7 +34,7 @@ def init(filename):
 
 def write_to_csv(rows, fieldnames, filename):
     with open(filename, 'a') as csvfile:
-        writer = csv.DictWriter(
+        writer = DictWriter(
             csvfile,
             fieldnames=fieldnames,
             delimiter='\t',
@@ -61,9 +61,9 @@ async def download_page(name, queue, fieldnames, filename):
                     else:
                         print('f{url} {response.status}')
             except aiohttp.client_exceptions.ClientConnectorError as e:
-                print('Connection error.', str(e))
-            except Exception as e:
-                print('There is a problem.', str(e))
+                print('Ошибка подключения.', str(e))
+            except asyncio.TimeoutError:
+                print('Превышен таймаут ожидания при загрузке {url}')
 
 
 def create_url(page):
@@ -77,7 +77,7 @@ def create_url(page):
     url = urlunparse(
         Components(
             scheme='http',
-            netloc='1.159.103.105:4000',
+            netloc='5.159.103.105:4000',
             query=urlencode(params),
             path='',
             url='/api/v1/logs',
@@ -114,8 +114,8 @@ async def main():
         '--tasks',
         default=1,
         type=int,
-        help='''Количевство одновременно работающих task
-            Значение по умолчанию - масимально доступное кол-во страниц.''',
+        help='''Количевство одновременно работающих asyncio.task.
+            Рекомендуемое значение - не более 7. Значение по умолчанию - 1.''',
         ),
     parser.add_argument(
         '-f',
@@ -144,5 +144,9 @@ async def main():
     await asyncio.gather(*tasks)
 
 
-if __name__ == '__main__':
+def start():
     asyncio.run(main())
+
+
+if __name__ == '__main__':
+    start()
